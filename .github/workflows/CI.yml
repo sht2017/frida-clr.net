@@ -1,0 +1,125 @@
+name: Build and Release
+
+on:
+    workflow_dispatch:
+    repository_dispatch:
+        types: [patch_updated]
+
+permissions:
+    contents: write
+
+env:
+    SRC_DIR: src
+    BUILD_DIR: build
+
+jobs:
+    build-windows:
+        env:
+            SOURCE_USER: frida
+            SOURCE_REPO: frida
+            PATCH_REPO: sht2017/frida-clr.net-patch
+
+        strategy:
+            matrix:
+                architecture: [x86, x86_64]
+
+        outputs:
+            FRIDA_VERSION: ${{ steps.fetch_info.outputs.FRIDA_VERSION }}
+
+        runs-on: windows-latest
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v4
+
+            - name: Download Patch and Version Info
+              id: fetch_info
+              shell: bash
+              run: |
+                  curl -sL "https://raw.githubusercontent.com/${{ env.PATCH_REPO }}/main/.version" -o .version
+                  FRIDA_VERSION=$(cat .version)
+                  echo "FRIDA_VERSION=$FRIDA_VERSION" >> $GITHUB_OUTPUT
+
+                  PATCH_URL=$(curl -s https://api.github.com/repos/${{ env.PATCH_REPO }}/releases/latest | jq -r '.assets[] | select(.name=="diff.patch") | .browser_download_url')
+                  curl -sL "$PATCH_URL" -o diff.patch
+
+            - name: Clone Project
+              shell: bash
+              run: |
+                  mkdir -p ${{ env.SRC_DIR }}
+                  pushd ${{ env.SRC_DIR }}
+                  git clone --recurse-submodules https://github.com/${{ env.SOURCE_USER }}/${{ env.SOURCE_REPO }}.git
+                  cd ${{ env.SOURCE_REPO }}
+                  git checkout ${{ steps.fetch_info.outputs.FRIDA_VERSION }}
+                  popd
+
+            - name: Apply Patch
+              shell: bash
+              run: |
+                  pushd ${{ env.SRC_DIR }}
+                  if ! git apply ../diff.patch; then
+                    echo "Failed to apply patch"
+                    exit 1
+                  fi
+                  popd
+
+            - name: Build Project
+              shell: powershell
+              run: |
+                  New-Item -ItemType Directory -Force -Path "${{ env.BUILD_DIR }}" | Out-Null
+                  $BuildDir = Resolve-Path "${{ env.BUILD_DIR }}"
+                  pushd "${{ env.SRC_DIR }}\${{ env.SOURCE_REPO }}"
+                  $Env:FRIDA_PREFIX = "$BuildDir\prefix"
+                  $Env:FRIDA_BUILD = "$BuildDir\build"
+                  New-Item -ItemType Directory -Force -Path $Env:FRIDA_PREFIX | Out-Null
+                  New-Item -ItemType Directory -Force -Path $Env:FRIDA_BUILD | Out-Null
+                  $Host_Arch = "${{ matrix.architecture }}"
+                  if ("${{ matrix.architecture }}" -eq "x86_64") {
+                      $Vs_Arch = "x64"
+                  } else {
+                      $Vs_Arch = "x86"
+                  }
+                  Write-Output "Setting up environment for Visual Studio"
+                  & "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Workload.NativeDesktop -property installationPath | Set-Variable VS_PATH
+                  & "$VS_PATH\VC\Auxiliary\Build\vcvarsall.bat" $Vs_Arch
+                  Write-Output "Preparing toolchain"
+                  python releng\deps.py roll toolchain windows-$Host_Arch
+                  Write-Output "Preparing SDK"
+                  python releng\deps.py roll sdk windows-$Host_Arch-md --activate
+                  Write-Output "Configuring build"
+                  .\configure --prefix "$Env:FRIDA_PREFIX" --host=windows-$Host_Arch-md --enable-frida-clr --disable-frida-python --disable-frida-tools -- "-Dfrida-core:compiler_backend=disabled"
+                  Write-Output "Making build"
+                  .\make install
+                  if (Test-Path "$Env:FRIDA_PREFIX\bin\Frida.dll") {
+                      Write-Output "Successfully built!"
+                      $ZipFile = "$BuildDir\frida-clr.net-windows-${{ matrix.architecture }}-${{ steps.fetch_info.outputs.FRIDA_VERSION }}.zip"
+                      Compress-Archive -Path "$Env:FRIDA_PREFIX\bin\Frida.dll" -DestinationPath $ZipFile -Force
+                  } else {
+                      Write-Error "Failed to build, Frida.dll not found"
+                      exit 1
+                  }
+                  popd
+
+            - name: Upload Windows ${{ matrix.architecture }} artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: windows-${{ matrix.architecture }}
+                  path: ${{ env.BUILD_DIR }}/*.zip
+
+    release:
+        runs-on: ubuntu-latest
+        needs: build-windows
+        steps:
+            - name: Download Windows build
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: windows-*
+                  path: ${{ env.BUILD_DIR }}
+
+            - name: Upload Release Artifacts
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: ${{ needs.build-windows.outputs.FRIDA_VERSION }}
+                  body: Automatically built patched project for ${{ needs.build-windows.outputs.FRIDA_VERSION }}
+                  files: ${{ env.BUILD_DIR }}/**/*.zip
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
