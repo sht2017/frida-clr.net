@@ -16,6 +16,8 @@ This project maintains up-to-date build for the Frida CLR bindings, allowing .NE
 
 The build migrate Frida CLR from the legacy .NET Framework to modern .NET, enabling better cross-platform compatibility and modern .NET features. WPF specific features have been removed.
 
+I started this project because I would like to use Frida in my **Steam Pal** project (haven't released yet), which is an extension about convenient searching and managing the library for Command Palette of PowerToys. Somehow, I found that the Frida CLR bindings are strongly related to WPF, which doesn't fit the specific purpose of my project. So I decided to migrate the Frida CLR bindings to modern .NET and remove the WPF dependencies.
+
 ## Features
 
 - Automatic daily checks for new Frida releases
