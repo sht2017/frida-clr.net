@@ -1,3 +1,5 @@
+### You may interest in [sht2017/frida-clr.net-patch](https://github.com/sht2017/frida-clr.net-patch) (CI Trigger, Patches)
+
 # frida-clr.net
 
 [![.NET](https://img.shields.io/badge/.NET-9.0-blue.svg)](https://dotnet.microsoft.com/download/dotnet/9.0)
@@ -24,6 +26,8 @@ The build migrate Frida CLR from the legacy .NET Framework to modern .NET, enabl
 ## Build
 
 Go check [CI](https://github.com/sht2017/frida-clr.net/blob/main/.github/workflows/CI.yml).
+
+CI will be triggered by [sht2017/frida-clr.net-patch](https://github.com/sht2017/frida-clr.net-patch)
 
 ## Usage
 1. Download the [latest release](https://github.com/sht2017/frida-clr.net/releases/latest) with your targeted architecture.
